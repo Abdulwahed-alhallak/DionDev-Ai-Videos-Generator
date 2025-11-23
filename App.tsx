@@ -4,12 +4,14 @@ import { Button } from './components/Button';
 import { LoadingScreen } from './components/LoadingScreen';
 import { VideoPlayer } from './components/VideoPlayer';
 import { ErrorBanner } from './components/ErrorBanner';
-import { enhancePromptWithScript, generateVideo, generateImagePreview } from './services/geminiService';
+import { enhancePromptWithScript, generateVideo, generateImagePreview, setManualApiKey } from './services/geminiService';
 import { GeneratedVideo, VideoConfig } from './types';
 
 function App() {
   const [hasKey, setHasKey] = useState(false);
   const [isLoadingKey, setIsLoadingKey] = useState(true);
+  const [showManualInput, setShowManualInput] = useState(false);
+  const [manualKeyInput, setManualKeyInput] = useState('');
   
   // App State
   const [topic, setTopic] = useState('');
@@ -41,6 +43,15 @@ function App() {
   const checkApiKey = async () => {
     setIsLoadingKey(true);
     try {
+      // 1. Check for manually saved key first
+      const localKey = localStorage.getItem("gemini_custom_key");
+      if (localKey) {
+        setHasKey(true);
+        setIsLoadingKey(false);
+        return;
+      }
+
+      // 2. Check for AI Studio environment key
       if (window.aistudio && window.aistudio.hasSelectedApiKey) {
         const has = await window.aistudio.hasSelectedApiKey();
         setHasKey(has);
@@ -65,12 +76,21 @@ function App() {
         // Assume success to avoid race condition
         setHasKey(true);
       } else {
-        setError("بيئة العمل هذه لا تدعم تحديد المفتاح تلقائياً.");
+        setError("بيئة العمل هذه لا تدعم تحديد المفتاح تلقائياً. يرجى إدخاله يدوياً.");
       }
     } catch (e) {
       console.error("Error selecting key:", e);
       setError("حدث خطأ أثناء تحديد المفتاح. يرجى المحاولة مرة أخرى.");
     }
+  };
+
+  const handleManualKeySubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualKeyInput.trim()) return;
+    
+    setManualApiKey(manualKeyInput.trim());
+    setHasKey(true);
+    setError(null);
   };
 
   const handleEnhance = async () => {
@@ -104,7 +124,7 @@ function App() {
       }
 
     } catch (err) {
-      setError("فشل في تحسين الوصف. تأكد من الاتصال بالإنترنت.");
+      setError("فشل في تحسين الوصف. تأكد من الاتصال بالإنترنت وصلاحية مفتاح API.");
       setIsEnhancing(false);
       setIsConfirmingImage(false);
     }
@@ -114,6 +134,8 @@ function App() {
     if (!enhancedPrompt) return;
     setIsGenerating(true);
     setError(null);
+    // Ensure we start with a clean slate for the new video
+    setGeneratedVideo(null);
     
     const config: VideoConfig = {
       prompt: enhancedPrompt,
@@ -131,17 +153,24 @@ function App() {
         timestamp: Date.now(),
         config
       });
-      // We don't necessarily need to set isConfirmingImage to false here, 
-      // as generatedVideo takes precedence in the UI rendering logic below.
+      // Success: UI will automatically switch to VideoPlayer view because generatedVideo is set.
     } catch (err: any) {
+      console.error("Video Generation Error:", err);
+      
+      // Explicitly clear generated video to ensure we stay in/return to the settings view
+      setGeneratedVideo(null);
+      
       // Handle "Requested entity was not found" error by resetting key
-      if (err.message && err.message.includes("Requested entity was not found")) {
+      if (err.message && (err.message.includes("Requested entity was not found") || err.message.includes("403"))) {
         setHasKey(false);
-        setError("انتهت صلاحية الجلسة أو المفتاح غير صالح. يرجى اختيار المفتاح مرة أخرى.");
+        setError("انتهت صلاحية الجلسة أو المفتاح غير صالح. يرجى إعادة إدخال المفتاح.");
+        localStorage.removeItem("gemini_custom_key");
       } else {
-        setError("فشل توليد الفيديو. قد يكون الطلب معقداً جداً أو انتهت حصة الاستخدام.");
+        // General error
+        setError("فشل توليد الفيديو. " + (err.message || "يرجى التحقق من الإعدادات."));
       }
-      console.error(err);
+      // Note: We deliberately leave isConfirmingImage as true so the user stays on Step 2
+      // and can retry easily without re-entering the prompt.
     } finally {
       setIsGenerating(false);
     }
@@ -160,16 +189,57 @@ function App() {
           </div>
           <h1 className="text-2xl md:text-3xl font-bold text-white">أهلاً بك</h1>
           <p className="text-slate-400 text-sm md:text-base">
-            لتوليد فيديوهات عالية الجودة باستخدام نموذج Veo، يجب ربط حساب Google Cloud المدفوع.
+            لتوليد فيديوهات عالية الجودة باستخدام نموذج Veo، يجب توفر مفتاح Google Cloud API فعال.
           </p>
           <div className="p-4 bg-yellow-900/20 border border-yellow-700/50 rounded-lg text-xs md:text-sm text-yellow-200">
             يرجى التأكد من تفعيل الفوترة في مشروعك.
             <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="underline mr-1 font-bold block sm:inline mt-1 sm:mt-0">اقرأ المزيد</a>
           </div>
+          
           {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
-          <Button onClick={handleSelectKey} className="w-full justify-center text-base md:text-lg">
-            ربط الحساب والبدء
-          </Button>
+          
+          {!showManualInput ? (
+            <div className="space-y-4">
+               {window.aistudio && (
+                <Button onClick={handleSelectKey} className="w-full justify-center text-base md:text-lg">
+                  ربط الحساب تلقائياً
+                </Button>
+               )}
+               
+               <button 
+                onClick={() => setShowManualInput(true)}
+                className="text-slate-400 text-sm hover:text-white underline decoration-slate-600 hover:decoration-white underline-offset-4 transition-all"
+               >
+                 أو أدخل مفتاح API يدوياً
+               </button>
+            </div>
+          ) : (
+            <form onSubmit={handleManualKeySubmit} className="space-y-3 animate-fade-in">
+              <div className="text-right">
+                <label className="text-xs text-slate-400 mb-1 block">مفتاح API</label>
+                <input 
+                  type="password" 
+                  value={manualKeyInput}
+                  onChange={(e) => setManualKeyInput(e.target.value)}
+                  placeholder="AIzaSy..."
+                  className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-mono"
+                  autoFocus
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button type="submit" className="flex-1 justify-center py-2" disabled={!manualKeyInput}>
+                  حفظ ودخول
+                </Button>
+                <button 
+                  type="button"
+                  onClick={() => setShowManualInput(false)}
+                  className="px-4 py-2 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
     );
@@ -355,8 +425,9 @@ function App() {
             <Button 
               onClick={handleGenerateVideo} 
               className="w-full justify-center text-lg mt-4 md:mt-6"
+              variant={error ? 'danger' : 'primary'}
             >
-              🎥 توليد الفيديو الآن
+              {error ? '🔄 المحاولة مرة أخرى' : '🎥 توليد الفيديو الآن'}
             </Button>
           </div>
         )}

@@ -1,9 +1,26 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { VideoConfig, ScriptResponse } from "../types";
 
+// Store key in memory/localstorage to support manual entry
+let manualApiKey = typeof window !== 'undefined' ? localStorage.getItem("gemini_custom_key") || "" : "";
+
+export const setManualApiKey = (key: string) => {
+  manualApiKey = key;
+  if (typeof window !== 'undefined') {
+    localStorage.setItem("gemini_custom_key", key);
+  }
+};
+
 // Helper to get a fresh client instance with the selected key
 const getAiClient = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Prioritize manual key, fallback to env var (auto-injected)
+  const apiKey = manualApiKey || process.env.API_KEY;
+  
+  if (!apiKey) {
+    throw new Error("مفتاح API غير موجود. يرجى ربط الحساب أو إدخال المفتاح يدوياً.");
+  }
+  
+  return new GoogleGenAI({ apiKey });
 };
 
 export const enhancePromptWithScript = async (topic: string): Promise<ScriptResponse> => {
@@ -84,5 +101,7 @@ export const generateVideo = async (config: VideoConfig): Promise<string> => {
   }
 
   // 4. Return URL with API Key appended (required for download/playback)
-  return `${videoUri}&key=${process.env.API_KEY}`;
+  // Note: We use the active key (either manual or env)
+  const activeKey = manualApiKey || process.env.API_KEY;
+  return `${videoUri}&key=${activeKey}`;
 };
