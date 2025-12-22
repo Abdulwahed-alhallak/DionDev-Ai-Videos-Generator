@@ -56,13 +56,18 @@ app.get('/api', (req: Request, res: Response) => {
   });
 });
 
-// TODO: Import and use routes
-// import authRoutes from './routes/auth.js';
+// Import routes
+import authRoutes from './routes/auth.js';
+
+// Use routes
+app.use('/api/auth', authRoutes);
+
+// TODO: Import and use other routes
 // import studentRoutes from './routes/students.js';
 // import teacherRoutes from './routes/teachers.js';
 // etc...
-// app.use('/api/auth', authRoutes);
 // app.use('/api/students', studentRoutes);
+// app.use('/api/teachers', teacherRoutes);
 
 // Error handling middleware
 app.use((err: any, req: Request, res: Response, next: any) => {
